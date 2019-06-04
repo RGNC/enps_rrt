@@ -1,6 +1,7 @@
 #ifndef _ENPS_RRT_H_
 #define _ENPS_RRT_H_
 
+#include <pgm.h>
 
 #define RRT_ALGORITHM      0
 #define RRT_STAR_ALGORITHM 1
@@ -26,6 +27,9 @@ typedef struct
 	
 	// algorithm id (RRT_ALGORITHM, RRT_STAR_ALGORITHM)
 	int algorithm;
+	
+	PGM* map;
+	float resolution;
 	
 	// obstacles
 	float *a;
@@ -70,7 +74,7 @@ float rnd();
 // TODO
 void init_obstacles(RRT_PARAMS* params); 
 
-void init_enps_rrt(int n, int m, float p, float q, float delta, float epsilon, float x_init, float y_init, int algorithm, RRT_PARAMS* params, RRT_VARS* vars);
+void init_enps_rrt1(int n, int m, float p, float q, float delta, float epsilon, float x_init, float y_init, int algorithm, RRT_PARAMS* params, RRT_VARS* vars);
 
 // TODO
 void free_memory(RRT_PARAMS* params, RRT_VARS* vars);

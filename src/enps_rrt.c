@@ -18,7 +18,10 @@ void init_obstacles(RRT_PARAMS* params)
 }
 
 
-void init_enps_rrt(int n, int m, float p, float q, float delta, float epsilon, float x_init, float y_init, int algorithm, RRT_PARAMS* params, RRT_VARS* vars)
+
+
+
+void init_enps_rrt1(int n, int m, float p, float q, float delta, float epsilon, float x_init, float y_init, int algorithm, RRT_PARAMS* params, RRT_VARS* vars)
 {
 	
 	params->n = n;

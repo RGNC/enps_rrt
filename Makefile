@@ -4,7 +4,7 @@ LDIR = lib
 BDIR = bin
 IDIR = include
 
-OBJ = main.o enps_rrt.o
+OBJ = main.o enps_rrt.o pgm.o
 OBJ_LIB = enps_rrt.o
       
 BIN = test
