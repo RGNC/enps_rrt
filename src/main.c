@@ -12,23 +12,36 @@
 
 void init_enps_rrt(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	params->map = load_pgm("../maps/basic.pgm");
+	#define IS_OBSTACLE(i,j) (i<0 || j<0 || i>=params->map->height || i>=params->map->width || params->map->raster[i*params->map->width+j]<OBSTACLE_THRESHOLD)
+	params->map = load_pgm("../maps/ccia.pgm");
 	params->resolution = RESOLUTION;
 	params->epsilon = ROBOT_RADIUS;
 	params->delta = 2*ROBOT_RADIUS;
+	
+	params->p = params->map->width * RESOLUTION;
+	params->q = params->map->height * RESOLUTION;
+	
+	float x=0,y=0;
+	int c=0;
+	params->a = (float*)malloc(params->map->width * params->map->height * sizeof(float));
+	params->b = (float*)malloc(params->map->width * params->map->height * sizeof(float));
 	for (int i=0;i<params->map->height;i++) {
+		
 		for (int j=0;j<params->map->width;j++) {
-			int x = params->map->raster[i*params->map->width+j];
-			if (x<OBSTACLE_THRESHOLD) {
-				printf("*");
-			} else {
-				printf(".");
+			x+=RESOLUTION;
+			if (IS_OBSTACLE(i,j)) {
+					
+			
+			
+				params->a[c] = x;
+				params->b[c] = y;
+				c++;
 			}
-		
 		}
-		printf("\n");
-		
+		y+=RESOLUTION;
+		x = 0;
 	}
+	printf("%d\n",c);
 }
 
 
