@@ -139,6 +139,24 @@ void destroy_pgm(PGM* pgm)
 	}
 }
 
+void remove_inner_obstacles(PGM* pgm)
+{
+	unsigned char* raster = (unsigned char*)malloc(pgm->width * pgm->height);
+	for (int i=0;i<pgm->height;i++) {
+		for (int j=0;j<pgm->width;j++) {
+			
+			if (IS_INNER_OBSTACLE(pgm,i,j)) {
+				raster[i*pgm->width+j] = 255;
+			} else {
+				raster[i*pgm->width+j] = pgm->raster[i*pgm->width+j];
+			}
+		}
+	}
+	free(pgm->raster);
+	pgm->raster = raster;
+}
+
+
 void draw_line(PGM* pgm, int x0, int y0, int x1, int y1, unsigned char color)
 {
 	double x = x0;

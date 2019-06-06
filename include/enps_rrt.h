@@ -28,9 +28,6 @@ typedef struct
 	// algorithm id (RRT_ALGORITHM, RRT_STAR_ALGORITHM)
 	int algorithm;
 	
-	PGM* map;
-	float resolution;
-	
 	// obstacles
 	float *a;
 	float *b;
