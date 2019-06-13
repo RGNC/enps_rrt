@@ -14,7 +14,7 @@ int main(int argc, char* argv[])
 	RRT_PARAMS params;
 	RRT_VARS vars;
 	
-	init_params(MAP,11,DEBUG,RRT_ALGORITHM,&params);
+	init_params(MAP,12,DEBUG,RRT_ALGORITHM,&params);
 	init_vars(8,10,&params,&vars);
 		
 	while (!vars.halt) {

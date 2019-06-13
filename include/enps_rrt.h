@@ -60,6 +60,9 @@ typedef struct
 	
 	float *d;
 	
+	float *c;
+	float *cp;
+	
 	float *dp;
 	float *dpp;
 	

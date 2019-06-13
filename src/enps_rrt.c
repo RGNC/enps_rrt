@@ -103,6 +103,9 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 	
 	if (params->algorithm == RRT_STAR_ALGORITHM) {
 		vars->dpp = (float*)malloc(params->M * params->N * sizeof(float));
+		vars->c = (float*)malloc(params->N * sizeof(float));
+		vars->cp = (float*)malloc(params->N * sizeof(float));
+		vars->c[0] = 0;
 	} else {
 		vars->dpp = NULL;
 	}
@@ -123,6 +126,8 @@ void free_memory(RRT_PARAMS* params,RRT_VARS* vars)
 	free(vars->dp);
 	if (params->algorithm==RRT_STAR_ALGORITHM) {
 		free(vars->dpp);
+		free(vars->c);
+		free(vars->cp);
 	}
 }
 
@@ -151,7 +156,7 @@ float p_dist(float Cx, float Cy, float Ax, float Ay, float Bx, float By)
 }
 
 
-// TODO
+
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 {
 	
@@ -198,7 +203,6 @@ void nearest(RRT_PARAMS* params, RRT_VARS* vars)
 	}
 	
 	vars->d[0] = min;
-
 }
 
 
@@ -217,20 +221,72 @@ void extend_rrt(RRT_PARAMS* params, RRT_VARS* vars)
 		int x1 = (int)round(vars->x_new / RESOLUTION);
 		int y1 = (int)round(vars->y_new / RESOLUTION);
 		draw_line(params->map,x0,y0,x1,y1,0);
-		
 	}
 }
 
 // TODO
 void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	for (int i=0;i<params->M;i++) {
-		for (int j=0;j<vars->index;j++) {
-			vars->dpp[i* params->N + j] = p_dist(params->a[i],params->b[i],vars->x[j],vars->y[j],vars->x_new,vars->y_new);
-			
+	// PARALLEL FOR
+	for (int i=0;i<vars->index;i++) {
+		for (int j=0;j<params->M;j++) {
+			vars->dpp[i* params->M + j] = p_dist(params->a[j],params->b[j],vars->x[i],vars->y[i],vars->x_new,vars->y_new);
+		}
+	}
+	float min;	
+	for (int i=0;i<vars->index;i++) {
+		// REDUCTION MIN:dpp[i]
+		min = vars->dpp[i*params->M];
+		for (int j=1;j<params->M;j++) {
+			if (vars->dpp[i*params->M+j] < min) {
+				min = vars->dpp[i*params->M+j];
+			}
+		}
+		
+		if (min> params->epsilon) {
+			vars->dpp[i*params->M]=1;
+		} else {
+			vars->dpp[i*params->M]=0;
 		}
 	}
 	
+	// PARALLEL FOR
+	for (int i=0;i<vars->index;i++) {
+		vars->cp[i] = vars->c[i] + 
+						(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
+						(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]) +
+						params->max_squared_distance * vars->dpp[i*params->M]; 
+	}
+	
+	min = vars->cp[0];
+	float x = vars->x[0];
+	float y = vars->y[0];
+	for (int i=1;i<vars->index;i++) {
+		if (vars->cp[i]<min) {
+			min=vars->cp[i];
+			x = vars->x[i];
+			y = vars->y[i];
+		}
+	}
+	
+	vars->x[vars->index] = vars->x_new;
+	vars->y[vars->index] = vars->y_new;
+	vars->px[vars->index] = x;
+	vars->py[vars->index] = y;
+	vars->c[vars->index] = min;
+
+	if (params->debug)
+	{
+		int x0 = (int)round(x / RESOLUTION);
+		int y0 = (int)round(y / RESOLUTION);
+		int x1 = (int)round(vars->x_new / RESOLUTION);
+		int y1 = (int)round(vars->y_new / RESOLUTION);
+		draw_line(params->map,x0,y0,x1,y1,0);
+	}
+
+
+	
+
 }
 
 void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars)
