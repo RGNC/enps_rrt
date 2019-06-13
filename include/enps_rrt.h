@@ -13,6 +13,8 @@
 #define NO_DEBUG 0
 #define DEBUG    1
 
+#define INF 9999999
+
 typedef struct
 {
 	int n;
@@ -41,8 +43,6 @@ typedef struct
 	PGM* map;
 	
 	int debug;
-	
-	float max_squared_distance;
 	
 } RRT_PARAMS;
 
@@ -80,25 +80,23 @@ typedef struct
 } RRT_VARS;
 
 
-void init_params(const char* file, int n, int debug, int algorithm, RRT_PARAMS* params);
+typedef struct
+{
+	float x;
+	float y;
+	float d;
+} XYD;
+
+XYD xyd_min2(XYD a, XYD b);
+void init_params(const char* file, int n, float delta,int debug, int algorithm, RRT_PARAMS* params);
 void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* vars);
 void free_memory(RRT_PARAMS* params, RRT_VARS* vars);
-
-
 float rnd(); // Get a random float number in [0,1)
-
 float p_dist(float Cx, float Cy, float Ax, float Ay, float Bx, float By);
-
 void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars);
-
 void nearest(RRT_PARAMS* params, RRT_VARS* vars);
-
-// TODO
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars);
-
 void extend_rrt(RRT_PARAMS* params, RRT_VARS* vars);
-
-// TODO
 void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars);
 
 #endif

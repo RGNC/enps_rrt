@@ -3,20 +3,20 @@
 #include <math.h>
 #include <enps_rrt.h>
 
+#include <omp.h>
 
-void init_params(const char* file, int n, int debug, int algorithm, RRT_PARAMS* params)
+void init_params(const char* file, int n, float delta, int debug, int algorithm, RRT_PARAMS* params)
 {
 	PGM* map = load_pgm(file);
 	params->map = load_pgm(file);
 
 	remove_inner_obstacles(map);
-
 	
 	params->epsilon = ROBOT_RADIUS * ROBOT_RADIUS;
-	params->delta =   ROBOT_RADIUS;
+	params->delta =   delta;
 	
 	params->n = n;
-	params->N = 1<<n;
+	params->N = 1<<n; // Number of nodes in RRT
 	
 	params->debug = debug;
 	
@@ -24,8 +24,6 @@ void init_params(const char* file, int n, int debug, int algorithm, RRT_PARAMS* 
 	params->q = map->height * RESOLUTION;
 	
 	params->algorithm = algorithm;
-	
-	params->max_squared_distance = 9*params->p*params->p + 9*params->q*params->q;
 	
 	float x=0,y=0;
 	int c=0;
@@ -51,7 +49,11 @@ void init_params(const char* file, int n, int debug, int algorithm, RRT_PARAMS* 
 		params->m++;
 		params->M <<= 1;
 	}
-	
+	if (debug) {
+		printf("Map: %s\n",file);
+		printf("Number of obstacles: %d\n",c);
+		printf("Number of nodes: %d\n",params->M);
+	}
 	params->a = (float*)realloc(params->a, (params->M)*sizeof(float));
 	params->b = (float*)realloc(params->b, (params->M)*sizeof(float));
 	
@@ -59,9 +61,6 @@ void init_params(const char* file, int n, int debug, int algorithm, RRT_PARAMS* 
 		params->a[i] = 3* params->p;
 		params->b[i] = 3* params->q;
 	}
-	
-	
-	
 	destroy_pgm(map);
 }
 
@@ -106,12 +105,8 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 		vars->c = (float*)malloc(params->N * sizeof(float));
 		vars->cp = (float*)malloc(params->N * sizeof(float));
 		vars->c[0] = 0;
-	} else {
-		vars->dpp = NULL;
-	}
+	} 
 }
-
-
 
 void free_memory(RRT_PARAMS* params,RRT_VARS* vars)
 {
@@ -132,77 +127,80 @@ void free_memory(RRT_PARAMS* params,RRT_VARS* vars)
 }
 
 
-
 float rnd()
 {
 	return (float)rand()/(float)(RAND_MAX);
 }
 
 
-
+// Squared distance from point (Cx,Cy) to segment [(Ax,Ay),(Bx,By)]
 float p_dist(float Cx, float Cy, float Ax, float Ay, float Bx, float By)
 {
 	float u = (Cx-Ax)*(Bx-Ax) + (Cy-Ay)*(By-Ay);
 	u /= (Bx-Ax)*(Bx-Ax) + (By-Ay)*(By-Ay);
-	 if (u<0) {
-		 return (Ax-Cx)*(Ax-Cx) + (Ay-Cy)*(Ay-Cy);
-	 }
-	 if (u>1) {
-		 return (Bx-Cx)*(Bx-Cx) + (By-Cy)*(By-Cy);
-	 }
-	 float Px = Ax + u*(Bx-Ax);
-	 float Py = Ay + u*(By-Ay);
-	 return (Px-Cx)*(Px-Cx) + (Py-Cy)*(Py-Cy);
+	if (u<0) {
+	 return (Ax-Cx)*(Ax-Cx) + (Ay-Cy)*(Ay-Cy);
+	}
+	if (u>1) {
+	 return (Bx-Cx)*(Bx-Cx) + (By-Cy)*(By-Cy);
+	}
+	float Px = Ax + u*(Bx-Ax);
+	float Py = Ay + u*(By-Ay);
+	return (Px-Cx)*(Px-Cx) + (Py-Cy)*(Py-Cy);
 }
-
 
 
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	
-	// PARALLEL FOR
+	//compute distances from all obstacles to segment [(x_nearest,y_nearest),(x_new,y_new)]
+	#pragma omp parallel for
 	for (int i=0;i<	params->M;i++) {
 		vars->dp[i] = p_dist(params->a[i],params->b[i],vars->x_nearest,vars->y_nearest,vars->x_new,vars->y_new);
 	}
 	
-	// REDUCTION OVER MIN:dp[i]
-	float min = vars->dp[0];
-	for (int i=1;i<params->M;i++) {
-		if (vars->dp[i]<min) {
-			min = vars->dp[i];
+	// Compute minimun distance
+	float m = INF;
+	#pragma omp parallel for reduction(min:m)
+	for (int i=0;i<params->M;i++) {
+		if (vars->dp[i]<m) {
+			m = vars->dp[i];
 		}
 	}
-	
-	vars->collision = params->epsilon - min;
+	// collision if minimun distance is less than epsilon
+	// variable collision has a value greater than 0 if collision
+	vars->collision = params->epsilon - m;
 }
+
+
+XYD xyd_min2(XYD a, XYD b)
+{
+	return a.d < b.d ? a : b;
+}
+
+
+#pragma omp declare reduction(xyd_min : XYD : omp_out=xyd_min2(omp_out,omp_in))\
+		initializer(omp_priv={0,0,INF})
 
 
 void nearest(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	// compute distances
-	// compute nearest
-	
-	// PARALLEL FOR
+	// compute squared distances from all points in RRT to (x_rand,y_rand)
+	#pragma omp parallel for
 	for (int i=0;i<vars->index;i++) {
 		vars->d[i] = (vars->x[i] - vars->x_rand) * (vars->x[i] - vars->x_rand) +
 						(vars->y[i] - vars->y_rand) * (vars->y[i] - vars->y_rand);
 	}
-	
-	float min = vars->d[0];
-	vars->x_nearest = vars->x[0];
-	vars->y_nearest = vars->y[0];
-	
-	
-	// REDUCTION OVER MIN:d[i]
-	for (int i=1;i<vars->index;i++) {
-		if (vars->d[i] < min) {
-			min = vars->d[i];
-			vars->x_nearest = vars->x[i];
-			vars->y_nearest = vars->y[i];
-		}
+
+	// compute minimun distance and nearest point
+	XYD value = {0,0,INF};
+	#pragma omp parallel for reduction(xyd_min:value)
+	for (int i=0;i<vars->index;i++) {
+		XYD new_value = {vars->x[i],vars->y[i],vars->d[i]};
+		value = xyd_min2(value,new_value);
 	}
-	
-	vars->d[0] = min;
+	vars->x_nearest = value.x;
+	vars->y_nearest = value.y;
+	vars->d[0] = value.d;
 }
 
 
@@ -213,80 +211,73 @@ void extend_rrt(RRT_PARAMS* params, RRT_VARS* vars)
 	vars->y[vars->index] = vars->y_new;
 	vars->px[vars->index] = vars->x_nearest;
 	vars->py[vars->index] = vars->y_nearest;
-
-	if (params->debug)
-	{
-		int x0 = (int)round(vars->x_nearest / RESOLUTION);
-		int y0 = (int)round(vars->y_nearest / RESOLUTION);
-		int x1 = (int)round(vars->x_new / RESOLUTION);
-		int y1 = (int)round(vars->y_new / RESOLUTION);
-		draw_line(params->map,x0,y0,x1,y1,0);
-	}
 }
 
-// TODO
+
 void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	// PARALLEL FOR
+	// compute squared distances from all obstacles to all segments [(x,y),(x_new,y_new)] where (x,y) are points in RRT
+	#pragma omp parallel for collapse(2)
 	for (int i=0;i<vars->index;i++) {
 		for (int j=0;j<params->M;j++) {
 			vars->dpp[i* params->M + j] = p_dist(params->a[j],params->b[j],vars->x[i],vars->y[i],vars->x_new,vars->y_new);
 		}
 	}
-	float min;	
+	
+	// For each point (x,y) in RRT, compute the minimun distance 
+	#pragma omp parallel for
 	for (int i=0;i<vars->index;i++) {
-		// REDUCTION MIN:dpp[i]
-		min = vars->dpp[i*params->M];
-		for (int j=1;j<params->M;j++) {
-			if (vars->dpp[i*params->M+j] < min) {
-				min = vars->dpp[i*params->M+j];
+		float m = INF;
+		#pragma omp parallel for reduction(min:m)
+		for (int j=0;j<params->M;j++) {
+			if (vars->dpp[i*params->M+j] < m) {
+				m = vars->dpp[i*params->M+j];
 			}
 		}
-		
-		if (min> params->epsilon) {
+		// if the minimun distance is less than epsilon, set a flag to avoid this possible edge
+		if (m< params->epsilon) {
 			vars->dpp[i*params->M]=1;
 		} else {
 			vars->dpp[i*params->M]=0;
 		}
 	}
 	
-	// PARALLEL FOR
+	// compute new cost for all points in RRT 
+	#pragma omp parallel for
 	for (int i=0;i<vars->index;i++) {
 		vars->cp[i] = vars->c[i] + 
 						(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
 						(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]) +
-						params->max_squared_distance * vars->dpp[i*params->M]; 
+						INF * vars->dpp[i*params->M]; 
 	}
 	
-	min = vars->cp[0];
-	float x = vars->x[0];
-	float y = vars->y[0];
-	for (int i=1;i<vars->index;i++) {
-		if (vars->cp[i]<min) {
-			min=vars->cp[i];
-			x = vars->x[i];
-			y = vars->y[i];
-		}
+	// compute minimun cost	
+	XYD value = {0,0,INF};
+	#pragma omp parallel for reduction(xyd_min:value)
+	for (int i=0;i<vars->index;i++) {
+		XYD new_value = {vars->x[i],vars->y[i],vars->cp[i]};
+		value = xyd_min2(value,new_value);
 	}
 	
 	vars->x[vars->index] = vars->x_new;
 	vars->y[vars->index] = vars->y_new;
-	vars->px[vars->index] = x;
-	vars->py[vars->index] = y;
-	vars->c[vars->index] = min;
+	vars->px[vars->index] = value.x;
+	vars->py[vars->index] = value.y;
+	vars->c[vars->index] = value.d;
 
-	if (params->debug)
-	{
-		int x0 = (int)round(x / RESOLUTION);
-		int y0 = (int)round(y / RESOLUTION);
-		int x1 = (int)round(vars->x_new / RESOLUTION);
-		int y1 = (int)round(vars->y_new / RESOLUTION);
-		draw_line(params->map,x0,y0,x1,y1,0);
+	// Fix edges
+	#pragma omp parallel for
+	for (int i=0;i<vars->index;i++) {
+		float aux = vars->c[vars->index] + 
+						(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
+						(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]);
+						
+		if (vars->c[i] > aux) {
+			vars->px[i] = vars->x_new;
+			vars->py[i] = vars->y_new;
+			vars->c[i] = aux;
+		}
 	}
-
-
-	
-
 }
 
 void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars)

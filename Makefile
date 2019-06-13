@@ -10,8 +10,8 @@ OBJ_LIB = enps_rrt.o
 BIN = test
 LIB = genetic.a
 
-CFlags=-c -O3 -Wall 
-LDFlags= -lm
+CFlags=-c -O3 -Wall -fopenmp 
+LDFlags= -lm -fopenmp 
 CC=gcc
 RM=rm
 
