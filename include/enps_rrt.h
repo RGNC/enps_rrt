@@ -3,9 +3,15 @@
 
 #include <pgm.h>
 
+
 #define RRT_ALGORITHM      0
 #define RRT_STAR_ALGORITHM 1
 
+#define RESOLUTION   0.05        // Each pixel is 5x5 cm 
+#define ROBOT_RADIUS 0.2         // This is the robot radius in meters, epsilon parameter
+
+#define NO_DEBUG 0
+#define DEBUG    1
 
 typedef struct
 {
@@ -32,6 +38,12 @@ typedef struct
 	float *a;
 	float *b;
 	
+	PGM* map;
+	
+	int debug;
+	
+	float max_squared_distance;
+	
 } RRT_PARAMS;
 
 
@@ -47,9 +59,9 @@ typedef struct
 	
 	
 	float *d;
-	float *xp;
-	float *yp;
+	
 	float *dp;
+	float *dpp;
 	
 	float x_rand;
 	float y_rand;
@@ -65,16 +77,14 @@ typedef struct
 } RRT_VARS;
 
 
-// Get a random float number in [0,1)
-float rnd();
-
-// TODO
-void init_obstacles(RRT_PARAMS* params); 
-
-void init_enps_rrt1(int n, int m, float p, float q, float delta, float epsilon, float x_init, float y_init, int algorithm, RRT_PARAMS* params, RRT_VARS* vars);
-
-// TODO
+void init_params(const char* file, int n, int debug, int algorithm, RRT_PARAMS* params);
+void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* vars);
 void free_memory(RRT_PARAMS* params, RRT_VARS* vars);
+
+
+float rnd(); // Get a random float number in [0,1)
+
+float p_dist(float Cx, float Cy, float Ax, float Ay, float Bx, float By);
 
 void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars);
 
