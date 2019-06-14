@@ -245,10 +245,16 @@ void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 	// compute new cost for all points in RRT 
 	#pragma omp parallel for
 	for (int i=0;i<vars->index;i++) {
-		vars->cp[i] = vars->c[i] + 
-						(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
-						(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]) +
-						INF * vars->dpp[i*params->M]; 
+		vars->cp[i] =  vars->dpp[i*params->M]>0 ? INF : 
+							vars->c[i] + 
+								(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
+								(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]);
+		
+		
+		//vars->cp[i] = vars->c[i] + 
+		//				(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
+		//				(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]) +
+		//				INF * vars->dpp[i*params->M]; 
 	}
 	
 	// compute minimun cost	

@@ -13,7 +13,7 @@
 #define NO_DEBUG 0
 #define DEBUG    1
 
-#define INF 9999999
+#define INF 99999
 
 typedef struct
 {

@@ -16,7 +16,7 @@
 
 int main(int argc, char* argv[])
 {
-	int selection=1;	
+	int selection=4;	
 	if (argc>1) {
 		selection = atoi(argv[1]);	
 	}
