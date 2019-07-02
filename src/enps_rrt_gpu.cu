@@ -14,8 +14,14 @@ extern "C" { // nvcc compiles en C++
 #include <thrust/functional.h>
 #include <thrust/extrema.h>
 #include <thrust/execution_policy.h>
+#include <cub/cub.cuh>
 
 using namespace std;
+
+struct _dev_pointers {
+	float *da,*db;
+	float *dx,*dy,*dd,*ddp;
+} devp;
 
 void init_params(const char* file, int n, float delta, int debug, int algorithm, RRT_PARAMS* params)
 {
@@ -76,21 +82,25 @@ void init_params(const char* file, int n, float delta, int debug, int algorithm,
 		params->a[i] = 3* params->p;
 		params->b[i] = 3* params->q;
 	}
+	
 	params->device = -1;
   	cudaGetDevice(&params->device);
-/*  	cudaMemPrefetchAsync(params->a, params->M*sizeof(float), params->device, NULL);
-  	cudaMemPrefetchAsync(params->b, params->M*sizeof(float), params->device, NULL);
-*/
+
+  	cudaMalloc(&devp.da,(params->M)*sizeof(float));
+	cudaMalloc(&devp.db,(params->M)*sizeof(float));
+	cudaMemcpy(devp.da,params->a,(params->M)*sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(devp.db,params->b,(params->M)*sizeof(float),cudaMemcpyHostToDevice);
+
 	destroy_pgm(map);
 }
 
 
 void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* vars)
 {
-	//vars->x = (float*)malloc((params->N)*sizeof(float));
-	//vars->y = (float*)malloc((params->N)*sizeof(float));
-	cudaMallocManaged(&vars->x,(params->N)*sizeof(float));
-	cudaMallocManaged(&vars->y,(params->N)*sizeof(float));
+	vars->x = (float*)malloc((params->N)*sizeof(float));
+	vars->y = (float*)malloc((params->N)*sizeof(float));
+	//cudaMallocManaged(&vars->x,(params->N)*sizeof(float));
+	//cudaMallocManaged(&vars->y,(params->N)*sizeof(float));	
 	
 	vars->x[0] = x_init;
 	vars->y[0] = y_init;
@@ -99,19 +109,25 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 		vars->x[i] = 3* params->p;
 		vars->y[i] = 3* params->q;
 	}
+
+	cudaMalloc(&devp.dx,(params->N)*sizeof(float));
+	cudaMalloc(&devp.dy,(params->N)*sizeof(float));
+	cudaMemcpy(devp.dx,vars->x,(params->N)*sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(devp.dy,vars->y,(params->N)*sizeof(float),cudaMemcpyHostToDevice);
 	
 	vars->px = (float*)malloc((params->N)*sizeof(float));
 	vars->py = (float*)malloc((params->N)*sizeof(float));
 	//cudaMallocManaged(&vars->x,(params->N)*sizeof(float));
     //cudaMallocManaged(&vars->y,(params->N)*sizeof(float));
 	
-	//vars->d = (float*)malloc((params->N)*sizeof(float));
-	cudaMallocManaged(&vars->d,(params->N)*sizeof(float));
+	vars->d = (float*)malloc((params->N)*sizeof(float));
+	//cudaMallocManaged(&vars->d,(params->N)*sizeof(float));
+	cudaMalloc(&devp.dd,(params->N)*sizeof(float));
 			
 	vars->dp = (float*)malloc((params->M)*sizeof(float));
 	//cudaMallocManaged(&vars->dp,(params->M)*sizeof(float));
-
-	// consider using cudaMemPrefetchAsync() for better performance
+	cudaMalloc(&devp.ddp,(params->M)*sizeof(float));
+	
 	vars->x_rand = 0;
 	vars->y_rand = 0;
 	
@@ -139,20 +155,27 @@ void free_memory(RRT_PARAMS* params,RRT_VARS* vars)
 	destroy_pgm(params->map);
 	free(params->a);
 	free(params->b);
-	//free(vars->x);
-	//free(vars->y);
+	free(vars->x);
+	free(vars->y);
 	free(vars->px);
 	free(vars->py);
-	//free(vars->d);
+	free(vars->d);
 	free(vars->dp);
 
+	//TODO: release GPU memory, see pointers devp
+	cudaFree(devp.da);
+	cudaFree(devp.db);
+	cudaFree(devp.dx);
+	cudaFree(devp.dy);
+	cudaFree(devp.dd);
+	cudaFree(devp.ddp);
 	//cudaFree(params->a);
 	//cudaFree(params->b);
-	cudaFree(vars->x);
-	cudaFree(vars->y);
+	//cudaFree(vars->x);
+	//cudaFree(vars->y);
 	//cudaFree(vars->px);
 	//cudaFree(vars->py);
-	cudaFree(vars->d);
+	//cudaFree(vars->d);
 	//cudaFree(vars->dp);
 	
 	if (params->algorithm==RRT_STAR_ALGORITHM) {
@@ -187,63 +210,31 @@ __host__ __device__ float p_dist(float Cx, float Cy, float Ax, float Ay, float B
 
 struct d_p_dist : public thrust::binary_function<float,float,float>
 {
-
 	float ax,ay,bx,by;
 	__host__ __device__ float operator()(float cx, float cy) { return p_dist(cx,cy,ax,ay,bx,by); }
 };
 
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	//k_obstacle_free<<<256,params->M/256+1>>>(vars->dp,params->a,params->b,vars->x_nearest,vars->y_nearest,vars->x_new,vars->y_new);
-/*
-	cudaMemPrefetchAsync(params->a, params->M*sizeof(float), params->device, NULL);
-  	cudaMemPrefetchAsync(params->b, params->M*sizeof(float), params->device, NULL);
-  	cudaDeviceSynchronize();
-
 	// compute distances from all obstacles to segment [(x_nearest,y_nearest),(x_new,y_new)]
 	struct d_p_dist dpdist_op;
 	dpdist_op.ax=vars->x_nearest;
 	dpdist_op.ay=vars->y_nearest;
 	dpdist_op.bx=vars->x_new;
 	dpdist_op.by=vars->y_new;
-	thrust::transform(thrust::device, params->a, params->a + params->M, params->b, vars->dp, dpdist_op); 
+	thrust::transform(thrust::device, devp.da, devp.da + params->M, devp.db, devp.ddp, dpdist_op); 
 
-	float * deb = new float[params->M];	
-	for (int i=0;i<	params->M;i++) {
-		deb[i] = p_dist(params->a[i],params->b[i],vars->x_nearest,vars->y_nearest,vars->x_new,vars->y_new);
-	}
-
-
-	/*cudaDeviceSynchronize();
-	cudaMemPrefetchAsync(vars->dp,params->M*sizeof(float),0);
-	cudaDeviceSynchronize();
-	for (int i =0; i< params->M; i++) {
-		if (deb[i] != vars->dp[i]) {
-			printf("GPU[%d]=%f != CPU[%d]=%f \n",i,vars->dp[i],i,deb[i]);
-		}
-	}
-	float m,m1 = INF;	
-	for (int i=0;i<params->M;i++) {
-		if (deb[i]<m1) {
-			m1 = deb[i];
-		}
-	}
-	/*if (m!=m1){
-		printf("mGPU=%f != mCPU=%f \n",m,m1);		
-	}
-	delete [] deb;
-
-	// Compute minimun distance
-	//float *m_pos = thrust::min_elem(thrust::device, vars->dp, vars->dp + params->M);
-	//float m = *m_pos;
-	//float m = thrust::reduce(thrust::device, vars->dp, vars->dp + params->M, INF, thrust::minimum<float>());
-	m=m1;
-
+	// Compute minimun distance	
+	// for some reason, the following line does not work
+	//float m = thrust::reduce(thrust::device, devp.ddp, devp.ddp + params->M, INF, thrust::minimum<float>());
+	float *m_pos = thrust::min_element(thrust::device, devp.ddp, devp.ddp + params->M);
+	float m;
+	cudaMemcpy(&m,m_pos,sizeof(float),cudaMemcpyDeviceToHost);	
 	// collision if minimun distance is less than epsilon
 	// variable collision has a value greater than 0 if collision
 	vars->collision = params->epsilon - m;
-*/
 
+/*
 	// CPU version:
 	//compute distances from all obstacles to segment [(x_nearest,y_nearest),(x_new,y_new)]
 	#pragma omp parallel for
@@ -261,7 +252,7 @@ void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 	}
 	// collision if minimun distance is less than epsilon
 	// variable collision has a value greater than 0 if collision
-	vars->collision = params->epsilon - m;
+	vars->collision = params->epsilon - m;*/
 }
 
 
@@ -277,41 +268,46 @@ XYD xyd_min2(XYD a, XYD b)
 
 struct d_squared_dist : public thrust::binary_function<float,float,float>
 {
-	float xr,yr;
-	__host__ __device__ float operator()(float x, float y) { return (x - xr) * (x - xr) + (y - yr) * (y - yr); }
+	float xr, yr;
+	__host__ __device__ __forceinline__ float operator()(float x, float y) { return ((x - xr) * (x - xr)) + ((y - yr) * (y - yr)); }
 };
 
 void nearest(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	// compute squared distances from all points in RRT to (x_rand,y_rand)
-	struct d_squared_dist dsqdist_op;
-    dsqdist_op.xr=vars->x_rand;
-	dsqdist_op.yr=vars->y_rand;
-	thrust::transform(thrust::device, vars->x, vars->x + vars->index, vars->y, vars->d, dsqdist_op);
+	if (vars->index > 500) {
+		// compute squared distances from all points in RRT to (x_rand,y_rand)
+		struct d_squared_dist dsqdist_op;
+	    dsqdist_op.xr=vars->x_rand;
+		dsqdist_op.yr=vars->y_rand;
+		thrust::transform(thrust::device, devp.dx, devp.dx + vars->index, devp.dy, devp.dd, dsqdist_op);
 
-	float *m_pos = thrust::min_element(thrust::device, vars->d, vars->d + vars->index);
-	int pos = m_pos - vars->d;
-	vars->x_nearest = vars->x[pos];
-	vars->y_nearest = vars->y[pos];
-	vars->d[0] = *m_pos;	
-
-	// compute squared distances from all points in RRT to (x_rand,y_rand)
-	/*#pragma omp parallel for
-	for (int i=0;i<vars->index;i++) {
-		vars->d[i] = (vars->x[i] - vars->x_rand) * (vars->x[i] - vars->x_rand) +
-						(vars->y[i] - vars->y_rand) * (vars->y[i] - vars->y_rand);
-	}	
-
-	// compute minimun distance and nearest point
-	XYD value = {0,0,INF};
-	#pragma omp parallel for reduction(xyd_min:value)
-	for (int i=0;i<vars->index;i++) {
-		XYD new_value = {vars->x[i],vars->y[i],vars->d[i]};
-		value = xyd_min2(value,new_value);
+		// compute minimun distance and nearest point	
+		float *m_pos = thrust::min_element(thrust::device, devp.dd, devp.dd + vars->index);
+		int pos = m_pos - devp.dd;//vars->d;
+		vars->x_nearest = vars->x[pos];
+		vars->y_nearest = vars->y[pos];
+		cudaMemcpy(vars->d,m_pos,sizeof(float),cudaMemcpyDeviceToHost);	
 	}
-	vars->x_nearest = value.x;
-	vars->y_nearest = value.y;
-	vars->d[0] = value.d;*/
+	else {
+		// CPU version:
+		// compute squared distances from all points in RRT to (x_rand,y_rand)
+		#pragma omp parallel for
+		for (int i=0;i<vars->index;i++) {
+			vars->d[i] = (vars->x[i] - vars->x_rand) * (vars->x[i] - vars->x_rand) +
+							(vars->y[i] - vars->y_rand) * (vars->y[i] - vars->y_rand);
+		}
+
+		// compute minimun distance and nearest point
+		XYD value = {0,0,INF};
+		#pragma omp parallel for reduction(xyd_min:value)
+		for (int i=0;i<vars->index;i++) {
+			XYD new_value = {vars->x[i],vars->y[i],vars->d[i]};
+			value = xyd_min2(value,new_value);
+		}
+		vars->x_nearest = value.x;
+		vars->y_nearest = value.y;
+		vars->d[0] = value.d;
+	}
 }
 
 
@@ -322,6 +318,15 @@ void extend_rrt(RRT_PARAMS* params, RRT_VARS* vars)
 	vars->y[vars->index] = vars->y_new;
 	vars->px[vars->index] = vars->x_nearest;
 	vars->py[vars->index] = vars->y_nearest;
+
+	if (vars->index == 500) {
+		cudaMemcpy(devp.dx,vars->x,(vars->index+1)*sizeof(float),cudaMemcpyHostToDevice);
+		cudaMemcpy(devp.dy,vars->y,(vars->index+1)*sizeof(float),cudaMemcpyHostToDevice);
+	}
+	else if (vars->index > 500) {
+		cudaMemcpy(devp.dx+vars->index,vars->x+vars->index,sizeof(float),cudaMemcpyHostToDevice);
+		cudaMemcpy(devp.dy+vars->index,vars->y+vars->index,sizeof(float),cudaMemcpyHostToDevice);
+	}
 }
 
 
@@ -400,7 +405,7 @@ void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars)
 {
 	// Exit if halting condition has been reached
-	if (vars->halt) {
+	if (vars->halt) {		
 		return;
 	}
 	
@@ -424,8 +429,7 @@ void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars)
 	// Exit if collision from (x_nearest, y_nearest) to (x_new, y_new)
 	if (vars->collision > 0) {
 		return;
-	}
-	cout << "here" << endl;
+	}	
 	
 	// Extend RRT tree
 	switch(params->algorithm)
@@ -448,4 +452,5 @@ void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars)
 		vars->halt = 1;
 	}
 }
+
 

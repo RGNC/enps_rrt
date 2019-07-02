@@ -165,7 +165,7 @@ void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 		if (vars->dp[i]<m) {
 			m = vars->dp[i];
 		}
-	}
+	}	
 	// collision if minimun distance is less than epsilon
 	// variable collision has a value greater than 0 if collision
 	vars->collision = params->epsilon - m;
@@ -200,7 +200,7 @@ void nearest(RRT_PARAMS* params, RRT_VARS* vars)
 	}
 	vars->x_nearest = value.x;
 	vars->y_nearest = value.y;
-	vars->d[0] = value.d;
+	vars->d[0] = value.d;	
 }
 
 

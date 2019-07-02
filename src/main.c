@@ -80,13 +80,13 @@ int main(int argc, char* argv[])
 	
 	srand(seed);
 	
-int iter=0;
-
+	params.debug=1;
+	//int iter=0;
 	while (!vars.halt) {
 		enps_rrt_one_iteration(&params,&vars);
-		iter++;
-		printf("Iteration %d\n",iter);
-		if (iter<0)	exit(0);
+		//iter++;
+		//printf("Iteration %d\n",iter);
+		//if (iter<0)	exit(0);
 	}
 	
 	if (params.debug) {
