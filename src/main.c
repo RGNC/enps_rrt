@@ -7,10 +7,10 @@
 #include <pgm.h>
 
 
-#define MAP1 "../maps/map.pgm"
-#define MAP2 "../maps/office.pgm"
-#define MAP3 "../maps/labyrinth.pgm"
-#define MAP4 "../maps/ccia_h.pgm"
+#define MAP1 "maps/map.pgm"
+#define MAP2 "maps/office.pgm"
+#define MAP3 "maps/labyrinth.pgm"
+#define MAP4 "maps/ccia_h.pgm"
 
 
 
@@ -79,9 +79,14 @@ int main(int argc, char* argv[])
 	}
 	
 	srand(seed);
-		
+	
+int iter=0;
+
 	while (!vars.halt) {
 		enps_rrt_one_iteration(&params,&vars);
+		iter++;
+		printf("Iteration %d\n",iter);
+		if (iter<0)	exit(0);
 	}
 	
 	if (params.debug) {

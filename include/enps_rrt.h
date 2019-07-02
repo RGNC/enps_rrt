@@ -43,6 +43,7 @@ typedef struct
 	PGM* map;
 	
 	int debug;
+	int device;
 	
 } RRT_PARAMS;
 
@@ -98,5 +99,4 @@ void nearest(RRT_PARAMS* params, RRT_VARS* vars);
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars);
 void extend_rrt(RRT_PARAMS* params, RRT_VARS* vars);
 void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars);
-
 #endif
