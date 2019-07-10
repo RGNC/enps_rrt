@@ -16,12 +16,15 @@ extern "C" { // nvcc compiles en C++
 #include <thrust/execution_policy.h>
 //#include <cub/cub.cuh>
 
+typedef unsigned int uint;
+
 using namespace std;
 
 struct _dev_pointers {
 	float *da,*db;
 	float *dx,*dy,*dd,*ddp;
 } devp;
+
 
 void init_params(const char* file, int n, float delta, int debug, int algorithm, RRT_PARAMS* params)
 {
@@ -88,12 +91,22 @@ void init_params(const char* file, int n, float delta, int debug, int algorithm,
 
   	cudaMalloc(&devp.da,(params->M)*sizeof(float));
 	cudaMalloc(&devp.db,(params->M)*sizeof(float));
+	//k_init_paramsab<<<params->M/256,256>>>(devp.da,devp.db,3,params->p,params->q,params->M);
 	cudaMemcpy(devp.da,params->a,(params->M)*sizeof(float),cudaMemcpyHostToDevice);
 	cudaMemcpy(devp.db,params->b,(params->M)*sizeof(float),cudaMemcpyHostToDevice);
 
 	destroy_pgm(map);
 }
 
+// initializes a vector dv with values val, from ini to end. At position ini, the value valini is given.
+__global__ void k_init_vec(float* dv, float val, float valini, uint ini, uint end) 
+{
+	uint i = threadIdx.x+blockDim.x*blockIdx.x;
+	if (i == ini)
+		dv[i] = valini;
+	if (i > ini && i < end)
+		dv[i] = val;
+}
 
 void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* vars)
 {
@@ -112,13 +125,15 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 
 	cudaMalloc(&devp.dx,(params->N)*sizeof(float));
 	cudaMalloc(&devp.dy,(params->N)*sizeof(float));
-	cudaMemcpy(devp.dx,vars->x,(params->N)*sizeof(float),cudaMemcpyHostToDevice);
-	cudaMemcpy(devp.dy,vars->y,(params->N)*sizeof(float),cudaMemcpyHostToDevice);
+	//cudaMemcpy(devp.dx,vars->x,(params->N)*sizeof(float),cudaMemcpyHostToDevice);
+	//cudaMemcpy(devp.dy,vars->y,(params->N)*sizeof(float),cudaMemcpyHostToDevice);
+	k_init_vec<<<params->N/256,256>>>(devp.dx,3*params->p,x_init,0,params->N);
+	k_init_vec<<<params->N/256,256>>>(devp.dy,3*params->q,y_init,0,params->N);
 	
 	vars->px = (float*)malloc((params->N)*sizeof(float));
 	vars->py = (float*)malloc((params->N)*sizeof(float));
 	//cudaMallocManaged(&vars->x,(params->N)*sizeof(float));
-    //cudaMallocManaged(&vars->y,(params->N)*sizeof(float));
+        //cudaMallocManaged(&vars->y,(params->N)*sizeof(float));
 	
 	vars->d = (float*)malloc((params->N)*sizeof(float));
 	//cudaMallocManaged(&vars->d,(params->N)*sizeof(float));
@@ -208,21 +223,17 @@ __host__ __device__ float p_dist(float Cx, float Cy, float Ax, float Ay, float B
 	return (Px-Cx)*(Px-Cx) + (Py-Cy)*(Py-Cy);
 }
 
-struct d_p_dist : public thrust::binary_function<float,float,float>
+__global__ void k_pdist(float* ddp, float* da, float*db, float x_nearest, float y_nearest, float x_new, float y_new, uint M) 
 {
-	float ax,ay,bx,by;
-	__host__ __device__ float operator()(float cx, float cy) { return p_dist(cx,cy,ax,ay,bx,by); }
-};
+	uint i = threadIdx.x+blockDim.x*blockIdx.x;
+	if (i < M)
+		ddp[i] = p_dist(da[i],db[i],x_nearest,y_nearest,x_new,y_new);
+}
 
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 {
 	// compute distances from all obstacles to segment [(x_nearest,y_nearest),(x_new,y_new)]
-	struct d_p_dist dpdist_op;
-	dpdist_op.ax=vars->x_nearest;
-	dpdist_op.ay=vars->y_nearest;
-	dpdist_op.bx=vars->x_new;
-	dpdist_op.by=vars->y_new;
-	thrust::transform(thrust::device, devp.da, devp.da + params->M, devp.db, devp.ddp, dpdist_op); 
+	k_pdist<<<params->M/256,256>>>(devp.ddp, devp.da, devp.db, vars->x_nearest, vars->y_nearest, vars->x_new, vars->y_new, params->M);
 
 	// Compute minimun distance	
 	// for some reason, the following line does not work
