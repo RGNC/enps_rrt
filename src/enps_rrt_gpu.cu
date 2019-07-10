@@ -14,7 +14,7 @@ extern "C" { // nvcc compiles en C++
 #include <thrust/functional.h>
 #include <thrust/extrema.h>
 #include <thrust/execution_policy.h>
-#include <cub/cub.cuh>
+//#include <cub/cub.cuh>
 
 using namespace std;
 
