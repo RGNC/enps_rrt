@@ -9,12 +9,7 @@ extern "C" { // nvcc compiles en C++
 
 #include <omp.h>
 #include <cuda.h>
-#include <thrust/transform.h>
-#include <thrust/reduce.h>
-#include <thrust/functional.h>
-#include <thrust/extrema.h>
-#include <thrust/execution_policy.h>
-//#include <cub/cub.cuh>
+#include <cub/cub.cuh>
 
 typedef unsigned int uint;
 
@@ -23,8 +18,9 @@ using namespace std;
 struct _dev_pointers {
 	float *da,*db;
 	float *dx,*dy,*dd,*ddp;
+	float *dcubtemp,*dm;
 } devp;
-
+#define MAX(a,b)=(a>b?a:b)
 
 void init_params(const char* file, int n, float delta, int debug, int algorithm, RRT_PARAMS* params)
 {
@@ -142,6 +138,13 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 	vars->dp = (float*)malloc((params->M)*sizeof(float));
 	//cudaMallocManaged(&vars->dp,(params->M)*sizeof(float));
 	cudaMalloc(&devp.ddp,(params->M)*sizeof(float));
+
+	size_t temp_storage_bytes1 = 0;
+	cub::DeviceReduce::Min(NULL, temp_storage_bytes1, devp.ddp, devp.dd, MAX(params->M,params->N));
+        size_t temp_storage_bytes2 = 0;
+	cub::DeviceReduce::ArgMin(NULL, temp_storage_bytes2, devp.ddp, devp.dd, MAX(params->M,params->N));
+	cudaMalloc(&devp.dcubtemp,MAX(temp_storage_bytes1,temp_storage_bytes2));
+	cudaMalloc(&devp.dm,sizeof(float));
 	
 	vars->x_rand = 0;
 	vars->y_rand = 0;
@@ -184,6 +187,8 @@ void free_memory(RRT_PARAMS* params,RRT_VARS* vars)
 	cudaFree(devp.dy);
 	cudaFree(devp.dd);
 	cudaFree(devp.ddp);
+	cudaFree(devp.dcubtemp);
+	cudaFree(devp.m);
 	//cudaFree(params->a);
 	//cudaFree(params->b);
 	//cudaFree(vars->x);
@@ -230,17 +235,22 @@ __global__ void k_pdist(float* ddp, float* da, float*db, float x_nearest, float 
 		ddp[i] = p_dist(da[i],db[i],x_nearest,y_nearest,x_new,y_new);
 }
 
+
+
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 {
 	// compute distances from all obstacles to segment [(x_nearest,y_nearest),(x_new,y_new)]
 	k_pdist<<<params->M/256,256>>>(devp.ddp, devp.da, devp.db, vars->x_nearest, vars->y_nearest, vars->x_new, vars->y_new, params->M);
 
 	// Compute minimun distance	
+	size_t dummy;
+	cub::DeviceReduce::Min(devp.dcubtemp, dummy, devp.ddp, devp.m, params->M);
+	float m;
 	// for some reason, the following line does not work
 	//float m = thrust::reduce(thrust::device, devp.ddp, devp.ddp + params->M, INF, thrust::minimum<float>());
-	float *m_pos = thrust::min_element(thrust::device, devp.ddp, devp.ddp + params->M);
+	/*float *m_pos = thrust::min_element(thrust::device, devp.ddp, devp.ddp + params->M);
 	float m;
-	cudaMemcpy(&m,m_pos,sizeof(float),cudaMemcpyDeviceToHost);	
+	cudaMemcpy(&m,m_pos,sizeof(float),cudaMemcpyDeviceToHost);	*/
 	// collision if minimun distance is less than epsilon
 	// variable collision has a value greater than 0 if collision
 	vars->collision = params->epsilon - m;
@@ -277,18 +287,12 @@ XYD xyd_min2(XYD a, XYD b)
 		initializer(omp_priv={0,0,INF})
 
 
-struct d_squared_dist : public thrust::binary_function<float,float,float>
-{
-	float xr, yr;
-	__host__ __device__ __forceinline__ float operator()(float x, float y) { return ((x - xr) * (x - xr)) + ((y - yr) * (y - yr)); }
-};
-
 void nearest(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	if (vars->index > 500) {
+	if (0) {   ///(vars->index > 500) {
 		// compute squared distances from all points in RRT to (x_rand,y_rand)
-		struct d_squared_dist dsqdist_op;
-	    dsqdist_op.xr=vars->x_rand;
+		/*struct d_squared_dist dsqdist_op;
+	        dsqdist_op.xr=vars->x_rand;
 		dsqdist_op.yr=vars->y_rand;
 		thrust::transform(thrust::device, devp.dx, devp.dx + vars->index, devp.dy, devp.dd, dsqdist_op);
 
@@ -297,7 +301,7 @@ void nearest(RRT_PARAMS* params, RRT_VARS* vars)
 		int pos = m_pos - devp.dd;//vars->d;
 		vars->x_nearest = vars->x[pos];
 		vars->y_nearest = vars->y[pos];
-		cudaMemcpy(vars->d,m_pos,sizeof(float),cudaMemcpyDeviceToHost);	
+		cudaMemcpy(vars->d,m_pos,sizeof(float),cudaMemcpyDeviceToHost);	*/
 	}
 	else {
 		// CPU version:
