@@ -14,13 +14,16 @@ extern "C" { // nvcc compiles en C++
 typedef unsigned int uint;
 
 using namespace std;
+using namespace cub;
 
 struct _dev_pointers {
 	float *da,*db;
 	float *dx,*dy,*dd,*ddp;
 	float *dcubtemp,*dm;
+	cub::KeyValuePair<int, int> *d_argmin;
 } devp;
-#define MAX(a,b)=(a>b?a:b)
+
+#define MAX(a,b) (a>b?a:b)
 
 void init_params(const char* file, int n, float delta, int debug, int algorithm, RRT_PARAMS* params)
 {
@@ -141,8 +144,11 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 
 	size_t temp_storage_bytes1 = 0;
 	cub::DeviceReduce::Min(NULL, temp_storage_bytes1, devp.ddp, devp.dd, MAX(params->M,params->N));
+	cudaDeviceSynchronize();
         size_t temp_storage_bytes2 = 0;
-	cub::DeviceReduce::ArgMin(NULL, temp_storage_bytes2, devp.ddp, devp.dd, MAX(params->M,params->N));
+	cudaMalloc(&devp.d_argmin,sizeof(KeyValuePair<int, int>));
+	cub::DeviceReduce::ArgMin(NULL, temp_storage_bytes2, devp.ddp, devp.d_argmin, MAX(params->M,params->N));
+	cudaDeviceSynchronize();
 	cudaMalloc(&devp.dcubtemp,MAX(temp_storage_bytes1,temp_storage_bytes2));
 	cudaMalloc(&devp.dm,sizeof(float));
 	
@@ -188,7 +194,7 @@ void free_memory(RRT_PARAMS* params,RRT_VARS* vars)
 	cudaFree(devp.dd);
 	cudaFree(devp.ddp);
 	cudaFree(devp.dcubtemp);
-	cudaFree(devp.m);
+	cudaFree(devp.dm);
 	//cudaFree(params->a);
 	//cudaFree(params->b);
 	//cudaFree(vars->x);
@@ -244,8 +250,10 @@ void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars)
 
 	// Compute minimun distance	
 	size_t dummy;
-	cub::DeviceReduce::Min(devp.dcubtemp, dummy, devp.ddp, devp.m, params->M);
+	cub::DeviceReduce::Min(devp.dcubtemp, dummy, devp.ddp, devp.dm, params->M);
+	cudaDeviceSynchronize();
 	float m;
+	cudaMemcpy(&m,devp.dm,sizeof(float),cudaMemcpyDeviceToHost);
 	// for some reason, the following line does not work
 	//float m = thrust::reduce(thrust::device, devp.ddp, devp.ddp + params->M, INF, thrust::minimum<float>());
 	/*float *m_pos = thrust::min_element(thrust::device, devp.ddp, devp.ddp + params->M);
