@@ -81,13 +81,21 @@ int main(int argc, char* argv[])
 	srand(seed);
 	
 	params.debug=1;
-	//int iter=0;
+	
 	while (!vars.halt) {
 		enps_rrt_one_iteration(&params,&vars);
-		//iter++;
-		//printf("Iteration %d\n",iter);
-		//if (iter<0)	exit(0);
 	}
+	/*	iter++;
+		printf("Iteration %d\n",iter);
+		if (iter<0)	exit(0);
+	}
+	printf("%d\n",vars.index);	
+	FILE * out = fopen ( "values.csv", "w");
+	fprintf(out,"index\t x\t y\t px\t py\n");
+	for (int i = 0; i<=vars.index; i++) {
+		fprintf(out,"%d\t %f\t %f\t %f\t %f\t\n",i,vars.x[i],vars.y[i],vars.px[i],vars.py[i]);
+	}
+	fclose(out);*/
 	
 	if (params.debug) {
 		
