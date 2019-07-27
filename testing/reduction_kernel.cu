@@ -1,5 +1,10 @@
 /*
- * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
+ * Code to test different parallel reduction kernels. CPU vs GPU vs CUB
+ * Miguel A. Martínez-del-Amor
+ * Research Group on Natural Computing
+ * Universidad de Sevilla (Spain)
+ *
+ * GPU kernels taken from reduction NVIDIA SDK examples
  *
  * Please refer to the NVIDIA end user license agreement (EULA) associated
  * with this source code for terms and conditions that govern your use of
@@ -8,6 +13,8 @@
  * is strictly prohibited.
  *
  */
+
+// compile with: nvcc -O3 -Xcompiler -fopenmp reduction_kernel.cu -o reduce
 
 /*
     Parallel reduction kernels
@@ -20,6 +27,7 @@
 #include <cooperative_groups.h>
 
 #include <float.h>
+#include <omp.h>
 #include "../include/cub/cub.cuh"
 
 namespace cg = cooperative_groups;
@@ -313,7 +321,7 @@ float reduceMin(int  n, float *d_idata, float * d_odata)
     // sum partial block sums on GPU
     int s=numBlocks;
 
-    while (s > 1)
+    while (s >= 1)
     {
         cudaDeviceSynchronize();
         int threads = 0, blocks = 0;
@@ -322,6 +330,7 @@ float reduceMin(int  n, float *d_idata, float * d_odata)
         callReduceMin(s, threads, blocks, d_idata, d_odata);
 
         s = (s + (threads*2-1)) / (threads*2);
+        if (s == 1) break;
     }
 
     cudaDeviceSynchronize();
@@ -331,34 +340,78 @@ float reduceMin(int  n, float *d_idata, float * d_odata)
     return gpu_result;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
-    const int N = 2<<15;
+    printf("Welcome to the testing program of reduction implementations\n");
+    int selection = 1;
+    int pow = 15;
+    int iter = 1;
+    if (argc == 0) {
+        printf("Usage: ./reduce I P T\n\tI = implementation: 1 (openMP), 2 (GPU kernels from SDK), 3 (GPU CUB library)\n\tP = pow of 2 leading to input size (1 <= P <= 15)\n\tT = number of times to repeat the reduction.");
+    }
+    if (argc>1) {
+		selection = atoi(argv[1]);	
+    }
+    if (argc>2) {
+        pow = atoi(argv[2]);
+    }
+    if (argc>3) {
+        iter = atoi(argv[3]);
+    }
+
+    const int N = 2<<pow;
     float * test = new float[N];
     for (int i=0; i< N; i++)
         test[i] = i*(-1.f);
 
     float * dtest, *daux, *dres;
+    float m = FLT_MAX;
 
-    cudaMalloc(&dtest,N*sizeof(float));
-    //cudaMalloc(&daux,N*sizeof(float));
-    cudaMemcpy(dtest,test,N*sizeof(float),cudaMemcpyHostToDevice);
+    // CPU
+    if (selection == 1) {
+        for (int j=0; j< iter; j++) {
+            #pragma omp parallel for reduction(min:m)
+            for (int i=0;i<N;i++) {
+                if (test[i]<m) {
+                    m = test[i];
+                }
+            }
+        }
+    } // GPU
+    else {
+        cudaMalloc(&dtest,N*sizeof(float));
+        cudaMemcpy(dtest,test,N*sizeof(float),cudaMemcpyHostToDevice);
 
-    //float m = reduceMin(N,dtest,daux);
-    cudaMalloc(&dres,sizeof(float));
-    size_t temp_bytes;
-	CubDebugExit(cub::DeviceReduce::Min(NULL, temp_bytes, dtest, dres, N));
-    (cudaMalloc(&daux,temp_bytes));
-    cub::DeviceReduce::Min(daux, temp_bytes, dtest, dres, N);
-    cudaDeviceSynchronize();
-    float m;
-	CubDebugExit(cudaMemcpy(&m,dres,sizeof(float),cudaMemcpyDeviceToHost));
-    printf("Obtained %f\n",m);
-    cudaFree(dres);
+        //// GPU Kernel
+        if (selection == 2) {
+            cudaMalloc(&daux,N*sizeof(float));
+            for (int j=0; j< iter; j++)
+                m = reduceMin(N,dtest,daux);
+            cudaFree(daux);
+        }
+        //// GPU CUB
+        else if (selection == 3) {
+            cudaMalloc(&dres,sizeof(float));
+            size_t temp_bytes;
+            CubDebugExit(cub::DeviceReduce::Min(NULL, temp_bytes, dtest, dres, N));
+            CubDebugExit(cudaMalloc(&daux,temp_bytes));
+            for (int j=0; j< iter; j++) {
+                cub::DeviceReduce::Min(daux, temp_bytes, dtest, dres, N);
+                CubDebugExit(cudaDeviceSynchronize());
+                CubDebugExit(cudaMemcpy(&m,dres,sizeof(float),cudaMemcpyDeviceToHost));
+            }
+            cudaFree(dres);
+            cudaFree(daux);
+        }
+        else {
+            printf("No mode\n");
+        }
+        cudaFree(dtest);
+    }
+
+    printf("Obtained %f\n",m);   
 
     delete [] test;
-    cudaFree(dtest);
-    cudaFree(daux);
 }
 
 #endif // #ifndef _REDUCE_KERNEL_H_
