@@ -29,6 +29,10 @@
 #include <float.h>
 #include <omp.h>
 #include "../include/cub/cub.cuh"
+#include <thrust/reduce.h>
+#include <thrust/functional.h>
+#include <thrust/extrema.h>
+#include <thrust/execution_policy.h>
 
 namespace cg = cooperative_groups;
 
@@ -346,8 +350,8 @@ int main(int argc, char* argv[])
     int selection = 1;
     int pow = 15;
     int iter = 1;
-    if (argc == 0) {
-        printf("Usage: ./reduce I P T\n\tI = implementation: 1 (openMP), 2 (GPU kernels from SDK), 3 (GPU CUB library)\n\tP = pow of 2 leading to input size (1 <= P <= 15)\n\tT = number of times to repeat the reduction.");
+    if (argc == 1) {
+        printf("Usage: ./reduce I P T\n\tI = implementation: 1 (openMP), 2 (GPU kernels from SDK), 3 (GPU CUB library), 5 (GPU Thrust library)\n\tP = pow of 2 leading to input size (1 <= P <= 32)\n\tT = number of times to repeat the reduction.");
     }
     if (argc>1) {
 		selection = atoi(argv[1]);	
@@ -403,6 +407,10 @@ int main(int argc, char* argv[])
             cudaFree(dres);
             cudaFree(daux);
         }
+	//// GPU Thrust
+	else if (selection == 4) {
+	    m = thrust::reduce(thrust::device, dtest, dtest + N, FLT_MAX, thrust::minimum<float>());
+	}
         else {
             printf("No mode\n");
         }
