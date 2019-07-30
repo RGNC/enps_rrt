@@ -409,7 +409,8 @@ int main(int argc, char* argv[])
         }
 	//// GPU Thrust
 	else if (selection == 4) {
-	    m = thrust::reduce(thrust::device, dtest, dtest + N, FLT_MAX, thrust::minimum<float>());
+	    for (int j=0; j< iter; j++)
+	    	m = thrust::reduce(thrust::device, dtest, dtest + N, FLT_MAX, thrust::minimum<float>());
 	}
         else {
             printf("No mode\n");
