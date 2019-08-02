@@ -89,8 +89,8 @@ int main(int argc, char* argv[])
 		printf("Iteration %d\n",iter);
 		if (iter<0)	exit(0);
 	}
-	printf("%d\n",vars.index);	
-	FILE * out = fopen ( "values.csv", "w");
+	printf("%d\n",vars.index);	*/
+	/* FILE * out = fopen ( "valuescpu.csv", "w");
 	fprintf(out,"index\t x\t y\t px\t py\n");
 	for (int i = 0; i<=vars.index; i++) {
 		fprintf(out,"%d\t %f\t %f\t %f\t %f\t\n",i,vars.x[i],vars.y[i],vars.px[i],vars.py[i]);

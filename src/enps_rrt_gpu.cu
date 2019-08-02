@@ -20,9 +20,14 @@ struct _dev_pointers {
 	float *da,*db;
 	float *dx,*dy,*dpx,*dpy,*dd,*ddp;
 	float *dm, *dx_nearest, *dy_nearest, *dx_new, *dy_new;
+	// for RRT*
+	float *dc, *dcp, *ddpp;
+	// for CUB
 	void  *dcubtemp;
 	cub::KeyValuePair<int,float> *d_argmin;
+	int *dsegments;
 	size_t temp_bytes;
+	// for kernel optimization
 	int num_multiproc;
 } devp;
 
@@ -147,7 +152,8 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 
 	cudaMalloc(&devp.d_argmin,sizeof(KeyValuePair<int, float>));
 	CubDebugExit(cub::DeviceReduce::ArgMin(NULL, devp.temp_bytes, devp.ddp, devp.d_argmin, MAX(params->M,params->N)));
-	CubDebugExit(cudaMalloc(&devp.dcubtemp,devp.temp_bytes));
+
+	//CubDebugExit(cudaMalloc(&devp.dcubtemp,devp.temp_bytes));
 	CubDebugExit(cudaMalloc(&devp.dm,sizeof(float)));
 	CubDebugExit(cudaMalloc(&devp.dx_nearest,sizeof(float)));
 	CubDebugExit(cudaMalloc(&devp.dy_nearest,sizeof(float)));
@@ -170,10 +176,28 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 	
 	if (params->algorithm == RRT_STAR_ALGORITHM) {
 		vars->dpp = (float*)malloc(params->M * params->N * sizeof(float));
+		CubDebugExit(cudaMalloc(&devp.ddpp,(params->N*params->M)*sizeof(float)));
 		vars->c = (float*)malloc(params->N * sizeof(float));
+		CubDebugExit(cudaMalloc(&devp.dc,(params->N)*sizeof(float)));
 		vars->cp = (float*)malloc(params->N * sizeof(float));
+		CubDebugExit(cudaMalloc(&devp.dcp,(params->N)*sizeof(float)));
 		vars->c[0] = 0;
+		CubDebugExit(cudaMemset(devp.dc,0,sizeof(float)));
+
+		CubDebugExit(cudaMalloc(&devp.dsegments,(params->N+1)*sizeof(float)));
+		uint* segments = new uint[params->N+1];
+		segments[0]=0;	
+		for (int i=1;i<=params->N;i++)
+			segments[i]=segments[i-1]+params->M;
+		cudaMemcpy(devp.dsegments,segments,(params->N+1)*sizeof(float),cudaMemcpyHostToDevice);
+		delete []segments;	
+
+		size_t bytesSegmented;
+		CubDebugExit(cub::DeviceSegmentedReduce::Min(NULL, bytesSegmented, devp.ddp, devp.dd, params->N, devp.dd, devp.dd + 1));	
+		devp.temp_bytes=MAX(devp.temp_bytes,bytesSegmented);
 	} 
+
+	CubDebugExit(cudaMalloc(&devp.dcubtemp,devp.temp_bytes));
 }
 
 void free_memory(RRT_PARAMS* params,RRT_VARS* vars)
@@ -395,75 +419,183 @@ void extend_rrt(RRT_PARAMS* params, RRT_VARS* vars)
 }
 
 
+__global__ void k_rrts_pdistall(float *ddp, float *da, float *db, float *dx, float *dy, float *dx_new, float *dy_new, uint index, uint M) 
+{
+	float ldx_new=*dx_new, ldy_new=*dy_new; // preload data to registers
+	for(uint i = threadIdx.x+blockDim.x*blockIdx.x; i<index; i+=gridDim.x*blockDim.x) {
+		float ldx=dx[i],ldy=dy[i];  // preload data to registers
+		for(uint j = threadIdx.y+blockDim.y*blockIdx.y; j<M; j+=gridDim.y*blockDim.y)
+			ddp[i*M+j] = d_p_dist(da[j],db[j],ldx,ldy,ldx_new,ldy_new);
+	}
+}
+
+/*
+__global__ void k_rrts_lessepsilon(float *ddpp, float epsilon, int index) {
+	for(uint i = threadIdx.x+blockDim.x*blockIdx.x; i<index; i+=gridDim.x*blockDim.x) 
+		ddpp[i] =  (ddpp[i] < epsilon)? 1.f : 0.f;
+}
+
+__global__ void k_rrts_newcost(float* dcp, float *ddpp, float *ddc, float *dx, float *dy, float *dx_new, float *dy_new, int index) {
+	for(uint i = threadIdx.x+blockDim.x*blockIdx.x; i<index; i+=gridDim.x*blockDim.x) {
+		dcp[i] =  ddpp[i]>0.f ? INF : 
+						ddc[i] + 
+						(*dx_new - dx[i])*(*dx_new - dx[i]) +
+						(*dy_new - dy[i])*(*dy_new - dy[i]);
+	}
+}
+*/
+
+// this kernel is the mix of the previous two
+__global__ void k_rrts_lessepsilon_newcost(float* dcp, float *ddpp, float *dc, float *dx, float *dy, float *dx_new, float *dy_new, int index, float epsilon) {
+	for(uint i = threadIdx.x+blockDim.x*blockIdx.x; i<index; i+=gridDim.x*blockDim.x) {
+		dcp[i] =  ddpp[i]<epsilon ? INF : 
+						dc[i] + 
+						(*dx_new - dx[i])*(*dx_new - dx[i]) +
+						(*dy_new - dy[i])*(*dy_new - dy[i]);
+	}
+}
+
+__global__ void k_rrts_extend (float *dc, float *dx, float *dy, float *dpx, float *dpy, float *dx_new, float *dy_new, KeyValuePair<int,float>* d_argmin, int index)
+{
+	dx[index] = *dx_new;
+	dy[index] = *dy_new;
+	dpx[index] = dx[d_argmin->key];
+	dpy[index] = dy[d_argmin->key];
+	dc[index] = d_argmin->value;
+}
+
+__global__ void k_rrts_fixedges (float *dc, float *dx, float *dy, float *dpx, float *dpy, float *dx_new, float *dy_new, KeyValuePair<int,float>* d_argmin, int index) 
+{
+	for(uint i = threadIdx.x+blockDim.x*blockIdx.x; i<index; i+=gridDim.x*blockDim.x) {
+		float aux = dc[index] + 
+					(*dx_new - dx[i])*(*dx_new - dx[i]) +
+					(*dy_new - dy[i])*(*dy_new - dy[i]);
+		
+		if (dc[i] > aux) {
+			dpx[i] = *dx_new;
+			dpy[i] = *dy_new;
+			dc[i] = aux;
+		}
+	}
+}
+
 void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 {
-	// compute squared distances from all obstacles to all segments [(x,y),(x_new,y_new)] where (x,y) are points in RRT
-	#pragma omp parallel for collapse(2)
-	for (int i=0;i<vars->index;i++) {
-		for (int j=0;j<params->M;j++) {
-			vars->dpp[i* params->M + j] = p_dist(params->a[j],params->b[j],vars->x[i],vars->y[i],vars->x_new,vars->y_new);
-		}
-	}
-	
-	// For each point (x,y) in RRT, compute the minimun distance 
-	#pragma omp parallel for
-	for (int i=0;i<vars->index;i++) {
-		float m = INF;
-		#pragma omp parallel for reduction(min:m)
-		for (int j=0;j<params->M;j++) {
-			if (vars->dpp[i*params->M+j] < m) {
-				m = vars->dpp[i*params->M+j];
+	if (vars->index <= THRES_GPU) {
+		// compute squared distances from all obstacles to all segments [(x,y),(x_new,y_new)] where (x,y) are points in RRT
+		#pragma omp parallel for collapse(2)
+		for (int i=0;i<vars->index;i++) {
+			for (int j=0;j<params->M;j++) {
+				vars->dpp[i* params->M + j] = p_dist(params->a[j],params->b[j],vars->x[i],vars->y[i],vars->x_new,vars->y_new);
 			}
 		}
-		// if the minimun distance is less than epsilon, set a flag to avoid this possible edge
-		if (m< params->epsilon) {
-			vars->dpp[i*params->M]=1;
-		} else {
-			vars->dpp[i*params->M]=0;
+	}
+	else {
+		dim3 block_size(16,16);
+		dim3 grid_size(MIN(vars->index/block_size.x+1,devp.num_multiproc*4),MIN(params->M/block_size.y+1,devp.num_multiproc*4));
+		k_rrts_pdistall<<<grid_size,block_size>>>(devp.ddpp, devp.da, devp.db, devp.dx, devp.dy, devp.dx_new, devp.dy_new, vars->index, params->M);
+		CubDebugExit(cudaDeviceSynchronize());
+	}
+	
+	if (vars->index <= THRES_GPU) {
+		// For each point (x,y) in RRT, compute the minimun distance 
+		#pragma omp parallel for
+		for (int i=0;i<vars->index;i++) {
+			float m = INF;
+			#pragma omp parallel for reduction(min:m)
+			for (int j=0;j<params->M;j++) {
+				if (vars->dpp[i*params->M+j] < m) {
+					m = vars->dpp[i*params->M+j];
+				}
+			}
+			// if the minimun distance is less than epsilon, set a flag to avoid this possible edge
+			if (m< params->epsilon) {
+				vars->dpp[i*params->M]=1;
+			} else {
+				vars->dpp[i*params->M]=0;
+			}
 		}
 	}
-	
-	// compute new cost for all points in RRT 
-	#pragma omp parallel for
-	for (int i=0;i<vars->index;i++) {
-		vars->cp[i] =  vars->dpp[i*params->M]>0 ? INF : 
-							vars->c[i] + 
-								(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
-								(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]);
-		
-		
-		//vars->cp[i] = vars->c[i] + 
-		//				(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
-		//				(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]) +
-		//				INF * vars->dpp[i*params->M]; 
-	}
-	
-	// compute minimun cost	
-	XYD value = {0,0,INF};
-	#pragma omp parallel for reduction(xyd_min:value)
-	for (int i=0;i<vars->index;i++) {
-		XYD new_value = {vars->x[i],vars->y[i],vars->cp[i]};
-		value = xyd_min2(value,new_value);
-	}
-	
-	vars->x[vars->index] = vars->x_new;
-	vars->y[vars->index] = vars->y_new;
-	vars->px[vars->index] = value.x;
-	vars->py[vars->index] = value.y;
-	vars->c[vars->index] = value.d;
+	else {
+		// For each point (x,y) in RRT, compute the minimun distance 
+		// Using CUB segmented reduce, a segment per row in the matrix vars->index*params->M
+		CubDebugExit(cub::DeviceSegmentedReduce::Min(devp.dcubtemp, devp.temp_bytes, devp.ddpp, devp.dd,
+			vars->index, devp.dsegments, devp.dsegments + 1));
+		CubDebugExit(cudaDeviceSynchronize());
 
-	// Fix edges
-	#pragma omp parallel for
-	for (int i=0;i<vars->index;i++) {
-		float aux = vars->c[vars->index] + 
-						(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
-						(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]);
-						
-		if (vars->c[i] > aux) {
-			vars->px[i] = vars->x_new;
-			vars->py[i] = vars->y_new;
-			vars->c[i] = aux;
+		// if the minimun distance is less than epsilon, set a flag to avoid this possible edge
+		// this is done in the following step
+		//k_rrts_lessepsilon<<<MIN(vars->index/256+1,devp.num_multiproc*8),256>>>(devp.dd,params->epsilon,vars->index);
+		//CubDebugExit(cudaDeviceSynchronize());
+	}
+	
+	if (vars->index <= THRES_GPU) {
+		// compute new cost for all points in RRT 
+		#pragma omp parallel for
+		for (int i=0;i<vars->index;i++) {
+			vars->cp[i] =  vars->dpp[i*params->M]>0 ? INF : 
+								vars->c[i] + 
+									(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
+									(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]);
 		}
+	}
+	else {
+		// compute new cost for all points in RRT
+		k_rrts_lessepsilon_newcost<<<MIN(vars->index/256+1,devp.num_multiproc*8),256>>>(devp.dcp, devp.dd, devp.dc, devp.dx, devp.dy, devp.dx_new, devp.dy_new, vars->index, params->epsilon);
+		CubDebugExit(cudaDeviceSynchronize());
+	}
+
+	if (vars->index <= THRES_GPU) {
+		// compute minimun cost	
+		XYD value = {0,0,INF};
+		#pragma omp parallel for reduction(xyd_min:value)
+		for (int i=0;i<vars->index;i++) {
+			XYD new_value = {vars->x[i],vars->y[i],vars->cp[i]};
+			value = xyd_min2(value,new_value);
+		}
+
+		// extend RRT*
+		vars->x[vars->index] = vars->x_new;
+		vars->y[vars->index] = vars->y_new;
+		vars->px[vars->index] = value.x;
+		vars->py[vars->index] = value.y;
+		vars->c[vars->index] = value.d;
+
+		// Fix edges
+		#pragma omp parallel for
+		for (int i=0;i<vars->index;i++) {
+			float aux = vars->c[vars->index] + 
+							(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
+							(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]);
+							
+			if (vars->c[i] > aux) {
+				vars->px[i] = vars->x_new;
+				vars->py[i] = vars->y_new;
+				vars->c[i] = aux;
+			}
+		}
+	}
+	else {
+		// compute minimun cost
+		CubDebugExit(cub::DeviceReduce::ArgMin(devp.dcubtemp, devp.temp_bytes, devp.dcp, devp.d_argmin, vars->index));
+		CubDebugExit(cudaDeviceSynchronize());
+
+		// extend RRT*
+		k_rrts_extend<<<1,1>>> (devp.dc, devp.dx, devp.dy, devp.dpx, devp.dpy, devp.dx_new, devp.dy_new, devp.d_argmin, vars->index);
+		CubDebugExit(cudaDeviceSynchronize());
+
+		// Fix edges
+		k_rrts_fixedges<<<MIN(vars->index/256+1,devp.num_multiproc*8),256>>> (devp.dc, devp.dx, devp.dy, devp.dpx, devp.dpy, devp.dx_new, devp.dy_new, devp.d_argmin, vars->index);
+		CubDebugExit(cudaDeviceSynchronize());
+	}
+
+	// reintegrate partial results from CPU to GPU
+	if (vars->index == THRES_GPU) {
+		CubDebugExit(cudaMemcpy(devp.dx,vars->x,(vars->index+1)*sizeof(float),cudaMemcpyHostToDevice));
+		CubDebugExit(cudaMemcpy(devp.dy,vars->y,(vars->index+1)*sizeof(float),cudaMemcpyHostToDevice));
+		CubDebugExit(cudaMemcpy(devp.dpx,vars->px,(vars->index+1)*sizeof(float),cudaMemcpyHostToDevice));
+		CubDebugExit(cudaMemcpy(devp.dpy,vars->py,(vars->index+1)*sizeof(float),cudaMemcpyHostToDevice));
+		CubDebugExit(cudaMemcpy(devp.dc,vars->c,(vars->index+1)*sizeof(float),cudaMemcpyHostToDevice));
 	}
 }
 
