@@ -6,7 +6,6 @@
 #include <math.h>
 #include <pgm.h>
 
-
 #define MAP1 "maps/map.pgm"
 #define MAP2 "maps/office.pgm"
 #define MAP3 "maps/labyrinth.pgm"
@@ -16,6 +15,7 @@
 
 int main(int argc, char* argv[])
 {
+	int n = 12;
 	int selection=1;
 	int algorithm = RRT_ALGORITHM;
 	int seed = time(NULL);
@@ -32,6 +32,7 @@ int main(int argc, char* argv[])
 		printf("\t1 = RRT ALGORITHM\n");
 		printf("\t2 = RRT STAR ALGORITHM\n");
 		printf("\n[s] is the random seed\n");
+		printf("\t[n] is the number of nodes (in log2)\n");
 		return 0;
 	}
 		
@@ -47,6 +48,10 @@ int main(int argc, char* argv[])
 		seed = atoi(argv[3]);
 	}
 
+	if (argc>4) {
+		n = atoi(argv[4]);
+	}
+
 	if (algorithm!= RRT_ALGORITHM && algorithm != RRT_STAR_ALGORITHM) {
 		printf("Invalid algorithm\n");
 		return 0;
@@ -58,19 +63,19 @@ int main(int argc, char* argv[])
 	switch (selection)
 	{
 		case 1:
-			init_params(MAP1,12,0.15,DEBUG,algorithm,&params);
+			init_params(MAP1,n,0.15,DEBUG,algorithm,&params);
 			init_vars(8,10,&params,&vars);
 		break;
 		case 2:
-			init_params(MAP2,12,0.15,DEBUG,algorithm,&params);
+			init_params(MAP2,n,0.15,DEBUG,algorithm,&params);
 			init_vars(32,9.3,&params,&vars);
 		break;
 		case 3:
-			init_params(MAP3,12,0.15,DEBUG,algorithm,&params);
+			init_params(MAP3,n,0.15,DEBUG,algorithm,&params);
 			init_vars(21.5,21.5,&params,&vars);
 		break;
 		case 4:
-			init_params(MAP4,12,0.15,DEBUG,algorithm,&params);
+			init_params(MAP4,n,0.15,DEBUG,algorithm,&params);
 			init_vars(5.25,30.45,&params,&vars);
 		break;
 		default:
@@ -85,11 +90,7 @@ int main(int argc, char* argv[])
 	while (!vars.halt) {
 		enps_rrt_one_iteration(&params,&vars);
 	}
-	/*	iter++;
-		printf("Iteration %d\n",iter);
-		if (iter<0)	exit(0);
-	}
-	printf("%d\n",vars.index);	*/
+
 	/* FILE * out = fopen ( "valuescpu.csv", "w");
 	fprintf(out,"index\t x\t y\t px\t py\n");
 	for (int i = 0; i<=vars.index; i++) {
