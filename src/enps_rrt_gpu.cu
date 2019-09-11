@@ -464,14 +464,14 @@ __global__ void k_rrts_extend (float *dc, float *dx, float *dy, float *dpx, floa
 	dc[index] = d_argmin->value;
 }
 
-__global__ void k_rrts_fixedges (float *dc, float *dx, float *dy, float *dpx, float *dpy, float *dx_new, float *dy_new, KeyValuePair<int,float>* d_argmin, int index) 
+__global__ void k_rrts_fixedges (float *dc, float *dx, float *dy, float *dpx, float *dpy, float *dx_new, float *dy_new, float* ddpp, KeyValuePair<int,float>* d_argmin, int index, float epsilon) 
 {
 	for(uint i = threadIdx.x+blockDim.x*blockIdx.x; i<index; i+=gridDim.x*blockDim.x) {
 		float aux = dc[index] + 
 					(*dx_new - dx[i])*(*dx_new - dx[i]) +
 					(*dy_new - dy[i])*(*dy_new - dy[i]);
 		
-		if (dc[i] > aux) {
+		if (dc[i] > aux && ddpp[i] < epsilon) {
 			dpx[i] = *dx_new;
 			dpy[i] = *dy_new;
 			dc[i] = aux;
@@ -585,7 +585,7 @@ void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 		CubDebugExit(cudaDeviceSynchronize());
 
 		// Fix edges
-		k_rrts_fixedges<<<MIN(vars->index/256+1,devp.num_multiproc*8),256>>> (devp.dc, devp.dx, devp.dy, devp.dpx, devp.dpy, devp.dx_new, devp.dy_new, devp.d_argmin, vars->index);
+		k_rrts_fixedges<<<MIN(vars->index/256+1,devp.num_multiproc*8),256>>> (devp.dc, devp.dx, devp.dy, devp.dpx, devp.dpy, devp.dx_new, devp.dy_new, devp.ddpp, devp.d_argmin, vars->index, params->epsilon);
 		CubDebugExit(cudaDeviceSynchronize());
 	}
 

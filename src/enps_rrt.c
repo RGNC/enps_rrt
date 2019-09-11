@@ -278,7 +278,7 @@ void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 						(vars->x_new - vars->x[i])*(vars->x_new - vars->x[i]) +
 						(vars->y_new - vars->y[i])*(vars->y_new - vars->y[i]);
 						
-		if (vars->c[i] > aux) {
+		if (vars->c[i] > aux && vars->dpp[i*params->M]==0) {
 			vars->px[i] = vars->x_new;
 			vars->py[i] = vars->y_new;
 			vars->c[i] = aux;
