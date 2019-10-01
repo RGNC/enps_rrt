@@ -27,4 +27,5 @@ void destroy_pgm(PGM* pgm);
 
 void remove_inner_obstacles(PGM* pgm);
 
+
 #endif

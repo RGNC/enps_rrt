@@ -13,15 +13,32 @@ void init_params(const char* file, int n, float delta, int debug, int algorithm,
 	remove_inner_obstacles(map);
 	
 	params->epsilon = ROBOT_RADIUS * ROBOT_RADIUS;
+	
+	if (debug) {
+		printf("epsilon = %f\n",params->epsilon);
+	}
+	
 	params->delta =   delta;
+	
+	if (debug) {
+		printf("delta = %f\n",params->delta);
+	}
 	
 	params->n = n;
 	params->N = 1<<n; // Number of nodes in RRT
+	
+	if (debug) {
+		printf("n = %d\n",params->n);
+	}
 	
 	params->debug = debug;
 	
 	params->p = map->width * RESOLUTION;
 	params->q = map->height * RESOLUTION;
+	
+	if (debug) {
+		printf("p = %f\nq = %f\n",params->p,params->q);
+	}
 	
 	params->algorithm = algorithm;
 	
@@ -42,6 +59,7 @@ void init_params(const char* file, int n, float delta, int debug, int algorithm,
 		y += RESOLUTION;
 		x = 0;
 	}
+	
 	params->m = 0;
 	params->M = 1;
 	
@@ -50,9 +68,13 @@ void init_params(const char* file, int n, float delta, int debug, int algorithm,
 		params->M <<= 1;
 	}
 	if (debug) {
-		printf("Map: %s\n",file);
-		printf("Number of obstacles: %d\n",c);
-		printf("Number of nodes: %d\n",params->M);
+		printf("m = %d\n",params->m);
+		printf("2^m = %d\n",params->M);
+	}
+	if (debug) {
+		printf("Map = %s\n",file);
+		printf("Number of obstacles = %d\n",c);
+		printf("Number of nodes in RRT = %d\n",params->M);
 	}
 	params->a = (float*)realloc(params->a, (params->M)*sizeof(float));
 	params->b = (float*)realloc(params->b, (params->M)*sizeof(float));
@@ -72,6 +94,14 @@ void init_vars(float x_init, float y_init, const RRT_PARAMS* params, RRT_VARS* v
 	
 	vars->x[0] = x_init;
 	vars->y[0] = y_init;
+	
+	if (params->debug) {
+		printf("x_init = %f\ny_init = %f\n",x_init,y_init);
+		printf("\n# OBSTACLES\n");
+		for (int i=0;i<	params->M;i++) {
+			printf("%f %f\n",params->a[i],params->b[i]);
+		}
+	}
 	
 	for (int i=1; i< params->N; i++) {
 		vars->x[i] = 3* params->p;
