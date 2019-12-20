@@ -329,6 +329,19 @@ void extend_rrt_star(RRT_PARAMS* params, RRT_VARS* vars)
 	}
 }
 
+void rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars)
+{
+	// Exit if halting condition has been reached
+	if (vars->halt) {
+		return;
+	}
+	
+	// compute (x_rand, y_rand)
+	vars->x_rand = params->p * rnd();
+	vars->y_rand = params->q * rnd();
+	
+}
+
 void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars)
 {
 	// Exit if halting condition has been reached
