@@ -31,8 +31,6 @@ int main(int argc, char* argv[])
 		printf("\n[a] is the algorithm index\n");
 		printf("\t1 = ENPS-RRT ALGORITHM\n");
 		printf("\t2 = ENPS-RRT STAR ALGORITHM\n");
-		printf("\t3 = RRT ALGORITHM\n");
-		printf("\t4 = RRT STAR ALGORITHM\n");
 		printf("\n[s] is the random seed\n");
 		return 0;
 	}
@@ -49,8 +47,7 @@ int main(int argc, char* argv[])
 		seed = atoi(argv[3]);
 	}
 
-	if (algorithm!= RRT_ALGORITHM && algorithm != RRT_STAR_ALGORITHM && 
-	    algorithm != PURE_RRT_ALGORITHM && algorithm != PURE_RRT_STAR_ALGORITHM) {
+	if (algorithm!= RRT_ALGORITHM && algorithm != RRT_STAR_ALGORITHM) {
 		printf("Invalid algorithm\n");
 		return 0;
 	}
@@ -86,9 +83,7 @@ int main(int argc, char* argv[])
 	while (!vars.halt) {
 		if (algorithm == RRT_ALGORITHM || algorithm == RRT_STAR_ALGORITHM) {
 			enps_rrt_one_iteration(&params,&vars);
-		} else {
-			rrt_one_iteration(&params,&vars);
-		}
+		} 
 	}
 	
 	if (params.debug) {

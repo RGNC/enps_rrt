@@ -24,8 +24,6 @@
 
 #define RRT_ALGORITHM      0
 #define RRT_STAR_ALGORITHM 1
-#define PURE_RRT_ALGORITHM      2
-#define PURE_RRT_STAR_ALGORITHM 3
 
 #define RESOLUTION   0.05        // Each pixel is 5x5 cm 
 #define ROBOT_RADIUS 0.2         // This is the robot radius in meters, epsilon parameter
@@ -114,7 +112,6 @@ void free_memory(RRT_PARAMS* params, RRT_VARS* vars);
 float rnd(); // Get a random float number in [0,1)
 float p_dist(float Cx, float Cy, float Ax, float Ay, float Bx, float By);
 void enps_rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars);
-void rrt_one_iteration(RRT_PARAMS* params, RRT_VARS* vars);
 void nearest(RRT_PARAMS* params, RRT_VARS* vars);
 void obstacle_free(RRT_PARAMS* params, RRT_VARS* vars);
 void extend_rrt(RRT_PARAMS* params, RRT_VARS* vars);
